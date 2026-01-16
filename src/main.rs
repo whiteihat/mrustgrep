@@ -1,10 +1,13 @@
 use std::{
-    io::{self, BufRead, Write}, // 导入标准输入输出相关模块
+    io::{self, Write}, // 导入标准输入输出相关模块
 };
 
 use anyhow::{Context, Result}; // 错误处理库
 use clap::{Arg, Command}; // 命令行参数解析库
-use regex::Regex; // 正则表达式库
+
+use crate::search::Searcher;
+
+mod search;
 
 fn main() -> Result<()> {
     // 构建命令行参数解析器
@@ -40,29 +43,36 @@ fn main() -> Result<()> {
 
 // 主运行逻辑，接收正则模式，返回匹配的行数
 fn run(pattern: &str) -> Result<usize> {
-    // 编译正则表达式
-    let re = Regex::new(pattern).context("regex invalid")?;
+    // 创建搜索器
+    let searcher = Searcher::new(
+        pattern,
+        search::Options {
+            show_line_number: true,
+            count_only: false,
+            case_ignore: false,
+            match_only: false,
+        },
+    )?;
 
-    let _stdin = io::stdin(); // 获取标准输入
+    // 获取输出格式的枚举类型
+    let format = searcher.output_format();
 
-    // 创建带缓冲的读取器和写入器
-    let reader = io::BufReader::new(_stdin.lock());
+    // 从标准输入读取数据
+    let stdin = io::stdin();
+    let reader = io::BufReader::new(stdin.lock());
     let mut writer = io::BufWriter::new(io::stdout());
 
-    let mut count = 0; // 匹配行计数
-    let mut line_number = 0; // 当前行号
+    let mut count = 0;
 
-    // 循环读取每一行进行匹配
-    for line_result in reader.lines() {
-        let line = line_result.context("Failed to read line")?;
-        line_number += 1;
+    // 使用迭代器模式，逐行搜索
+    for result in searcher.search(reader) {
+        let search_result = result.context("Failed to read or search line")?;
+        count += 1;
 
-        if re.is_match(&line) {
-            count += 1;
-            writeln!(writer, "{}: {}", line_number, line.trim_end())
-                .context("Failed to write output")?;
-        }
+        // 使用枚举 match
+        search_result.format_to(&mut writer, &format)?;
     }
 
+    writer.flush()?;
     Ok(count)
 }
